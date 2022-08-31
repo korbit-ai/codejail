@@ -113,7 +113,7 @@ def get_proxy():
     # If we need a proxy, make a proxy.
     if PROXY_PROCESS is None:
         # Start the proxy by invoking proxy_main.py in our root directory.
-        root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+        root = os.path.dirname(os.path.realpath(__file__))
         proxy_main_py = os.path.join(root, "proxy_main.py")
 
         # Run proxy_main.py with the same Python that is running us. "-u" makes
@@ -128,7 +128,7 @@ def get_proxy():
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            )
+        )
         log.info("Started CodeJail proxy process (pid %d)", PROXY_PROCESS.pid)
 
     return PROXY_PROCESS

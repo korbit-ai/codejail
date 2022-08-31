@@ -10,7 +10,7 @@ from builtins import bytes
 
 from .proxy import run_subprocess_through_proxy
 from .subproc import run_subprocess
-from .util import temp_directory
+from .util import temp_directory, create_directory
 
 log = logging.getLogger("codejail")
 
@@ -38,7 +38,8 @@ def configure(command, bin_path, user=None):
     if command == "python":
         # -E means ignore the environment variables PYTHON*
         # -B means don't try to write .pyc files.
-        cmd_argv.extend(['-E', '-B'])
+        # -u force the stdout and stderr streams to be unbuffered
+        cmd_argv.extend(['-E', '-B', '-u'])
 
     COMMANDS[command] = {
         # The start of the command line for this program.
@@ -90,7 +91,7 @@ DEFAULT_LIMITS = {
     # Size of files creatable, in bytes, defaulting to nothing can be written.
     "FSIZE": 0,
     # The number of processes and threads to allow.
-    "NPROC": 15,
+    "NPROC": 50,
     # Whether to use a proxy process or not.  None means use an environment
     # variable to decide. NOTE: using a proxy process is NOT THREAD-SAFE, only
     # one thread can use CodeJail at a time if you are using a proxy process.
@@ -186,7 +187,8 @@ class JailResult:
 
 
 def jail_code(command, code=None, files=None, extra_files=None, argv=None,
-              stdin=None, limit_overrides_context=None, slug=None):
+              stdin=None, limit_overrides_context=None, slug=None, 
+              artifacts=None):
     """
     Run code in a jailed subprocess.
 
@@ -239,8 +241,7 @@ def jail_code(command, code=None, files=None, extra_files=None, argv=None,
 
         # Make directory readable by other users ('sandbox' user needs to be
         # able to read it).
-        os.chmod(homedir, 0o775)
-
+        os.chmod(homedir, 0o751)
         # Make a subdir to use for temp files, world-writable so that the
         # sandbox user can write to it.
         tmptmp = os.path.join(homedir, "tmp")
@@ -259,11 +260,14 @@ def jail_code(command, code=None, files=None, extra_files=None, argv=None,
             else:
                 shutil.copytree(filename, dest, symlinks=True)
 
+        if artifacts:
+            save_artifacts(artifacts, tmptmp)
         # Create the main file.
         if code:
             with open(os.path.join(homedir, "jailed_code"), "wb") as jailed:
                 code_bytes = bytes(code, 'utf8')
                 jailed.write(code_bytes)
+            os.chmod(os.path.join(homedir, "jailed_code"), 0o750)
 
             argv = ["jailed_code"] + argv
 
@@ -320,7 +324,7 @@ def jail_code(command, code=None, files=None, extra_files=None, argv=None,
             stdin=stdin,
             realtime=effective_limits["REALTIME"],
             rlimits=create_rlimits(effective_limits),
-            )
+        )
 
         result = JailResult()
         result.status = status
@@ -375,3 +379,21 @@ def create_rlimits(effective_limits):
     rlimits.append((resource.RLIMIT_FSIZE, (fsize, fsize)))
 
     return rlimits
+
+
+def save_artifacts(artifacts, save_path):
+    datasets_dest_dir = create_directory(save_path, 'datasets')
+    images_dest_dir = create_directory(save_path, 'images')
+    videos_dest_dir = create_directory(save_path, 'videos')
+    for artifact_path in artifacts:
+        path = datasets_dest_dir
+        if artifact_path.endswith(('.png', '.jpg', '.jpeg')):
+            path = images_dest_dir
+        elif artifact_path.endswith(('.mp4', '.mov', '.gif', '.avi', '.mpeg', '.mkv')):
+            path = videos_dest_dir
+        with open(artifact_path, 'r') as file:
+            content = file.read()
+            new_file = os.path.join(path, os.path.basename(artifact_path))
+        with open(new_file, 'w') as file:
+            file.write(content)
+        os.chmod(new_file, 0o777)
